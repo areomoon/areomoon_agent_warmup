@@ -169,6 +169,27 @@ Phase 2（第3-4月）: QLoRA fine-tuning + evaluation benchmark
 
 ---
 
+## 職涯策略（配套知識庫）
+
+本 repo 專注「技術 warmup」。完整的職涯規劃（人脈、Portfolio、薪資談判、目標公司分析）在 [llm_knowledge_base](https://github.com/areomoon/llm_knowledge_base) 中：
+
+| 文件 | 內容 |
+|------|------|
+| `wiki/queries/2026-04-09-career-execution-plan.md` | 入職前 → 入職 → 跳槽 完整時間線（含技術對齊本 repo 模組） |
+| `wiki/derived/openai-target-role-strategy.md` | OpenAI AI Deployment Engineer JD 分析 + 能力差距 |
+| `wiki/derived/gemini-career-decision-patsnap.md` | Patsnap 決策分析（薪資/風險/路線） |
+| `wiki/derived/chatgpt-patsnap-interview-strategy.md` | 面試答題框架 + 談薪話術 |
+| `wiki/derived/career-development-roadmap.md` | 200k → 300-400k 路線圖 |
+
+### 本 repo 缺少但知識庫有的
+
+- **Evaluation / Benchmark 模組**：目前無對應練習，但這是 OpenAI/Anthropic 類缺的差異化武器。建議入職後在 Patsnap 實戰中累積，未來可回填為 `08_evaluation/`
+- **人脈策略**：Grab 前同事經營時間線、LinkedIn 經營、SG AI meetup
+- **Portfolio 計畫**：技術文章寫作計畫（3 篇）、GitHub 公開 repo 策略
+- **面試 Narrative**：從 "Search Engineer" → "AI Agent / RAG System Builder" 的定位轉換
+
+---
+
 ## 參考資料
 
 - [`resources/papers.md`](resources/papers.md) — 完整論文清單
