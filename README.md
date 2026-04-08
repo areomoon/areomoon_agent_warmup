@@ -27,6 +27,8 @@ Phase 2（第3-4月）: QLoRA fine-tuning + evaluation benchmark
 | [05 Material Science Agents](#05-material-science-agents) | MARS、LLMatDesign、Extraction Agent | Phase 1 | 持續 |
 | [06 Fine-tuning](#06-fine-tuning) | LoRA、QLoRA、SFT、Evaluation | Week 5 | 12–15hr |
 | [07 Multimodal](#07-multimodal) | 圖表理解、PDF multi-modal、Vision LLM | Week 4 | 8–10hr |
+| [08 Evaluation](#08-evaluation) | Agent-level eval、SWE-bench/MADE 風格 benchmark | Week 5–6 | 6–8hr |
+| [09 Production Patterns](#09-production-patterns) | Context compression、Permission gating、Observability | Week 6 | 8–10hr |
 
 ---
 
@@ -152,6 +154,53 @@ Phase 2（第3-4月）: QLoRA fine-tuning + evaluation benchmark
 
 ---
 
+## 08 Evaluation
+
+**學習目標：** 建立 agent-level evaluation 能力（task completion rate、efficiency、safety、cost）
+
+> 權威框架：SWE-bench (Princeton NLP, ICLR 2024), METR (Beth Barnes), HELM (Percy Liang, Stanford), MADE (材料科學)
+
+```
+08_evaluation/
+├── task_completion_eval.py       # 多步驟任務完成率評估（SWE-bench 風格）
+├── cost_efficiency_eval.py       # Token cost / step count / time tracking
+├── made_style_benchmark.py       # 材料科學抽取 benchmark（MADE 風格）
+└── notebook/
+    └── eval_lab.ipynb            # baseline vs agent vs fine-tuned 比較
+```
+
+**關鍵資源：**
+- [SWE-bench (Jimenez, Yao et al., ICLR 2024 Oral)](https://arxiv.org/abs/2310.06770)
+- [METR — Task-completion time horizon (Beth Barnes)](https://metr.org/)
+- [HELM (Percy Liang, Stanford CRFM)](https://crfm.stanford.edu/helm/)
+- [MADE Benchmark](https://arxiv.org/abs/2601.20996)
+
+---
+
+## 09 Production Patterns
+
+**學習目標：** 讓 agent 從 demo 變成 production-grade — harness 工程
+
+> Phil Schmid (HuggingFace): Model=CPU, Harness=OS。Swyx (Latent Space): Agent Labs 的核心投資在 harness 不在 loop。
+
+```
+09_production_patterns/
+├── context_compression.py        # 3 層壓縮（MicroCompact → AutoCompact → Reset）
+├── permission_gating.py          # 3 層權限（allow / prompt / deny）
+├── observability.py              # LangSmith / Langfuse agent tracing
+└── notebook/
+    └── production_lab.ipynb      # 把 03 的 agent 升級為 production-grade
+```
+
+**關鍵資源：**
+- [Building Effective Agents — Anthropic (Schluntz & Zhang)](https://www.anthropic.com/research/building-effective-agents)
+- [12 Agentic Harness Patterns from Claude Code](https://generativeprogrammer.com/p/12-agentic-harness-patterns-from)
+- [Agent Harness as OS — Phil Schmid (HuggingFace)](https://www.philschmid.de/agent-harness-2026)
+- [IMPACT Framework — Swyx (Latent Space)](https://www.latent.space/p/agent)
+- [Building AI Agents — Chip Huyen](https://huyenchip.com/2025/01/07/agents.html)
+
+---
+
 ## 07 Multimodal
 
 **學習目標：** 能處理含圖表的科學論文，輸出結構化 JSON 數據
@@ -180,10 +229,17 @@ Phase 2（第3-4月）: QLoRA fine-tuning + evaluation benchmark
 | `wiki/derived/gemini-career-decision-patsnap.md` | Patsnap 決策分析（薪資/風險/路線） |
 | `wiki/derived/chatgpt-patsnap-interview-strategy.md` | 面試答題框架 + 談薪話術 |
 | `wiki/derived/career-development-roadmap.md` | 200k → 300-400k 路線圖 |
+| `wiki/concepts/agent-product-design.md` | Agent 產品設計原則（Anthropic/Ng/Chip Huyen 權威引用） |
+| `wiki/concepts/agent-evaluation.md` | Agent Evaluation 框架（SWE-bench/METR/HELM/MADE） |
+| `wiki/derived/2026-04-09-agent-product-case-studies.md` | Agent 產品案例（4 tier: Copilot→Autonomous） |
+| `wiki/derived/2026-04-09-warmup-agent-knowledge-gap-analysis.md` | 本 repo 與 KB 的缺口分析 |
 
 ### 本 repo 缺少但知識庫有的
 
-- **Evaluation / Benchmark 模組**：目前無對應練習，但這是 OpenAI/Anthropic 類缺的差異化武器。建議入職後在 Patsnap 實戰中累積，未來可回填為 `08_evaluation/`
+- ~~**Evaluation / Benchmark 模組**~~ → 已新增 `08_evaluation/`
+- ~~**Production Patterns 模組**~~ → 已新增 `09_production_patterns/`
+- **Agent 產品設計思維**：如何用產品語言（而非技術語言）討論 agent → 見 KB `wiki/concepts/agent-product-design.md`
+- **Agent 產品案例研究**：Cursor/Devin/Harvey AI/ChemCrow/MARS 按自主度分層 → 見 KB `wiki/derived/2026-04-09-agent-product-case-studies.md`
 - **人脈策略**：Grab 前同事經營時間線、LinkedIn 經營、SG AI meetup
 - **Portfolio 計畫**：技術文章寫作計畫（3 篇）、GitHub 公開 repo 策略
 - **面試 Narrative**：從 "Search Engineer" → "AI Agent / RAG System Builder" 的定位轉換
