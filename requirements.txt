@@ -1,0 +1,50 @@
+# areomoon_agent_warmup — 依賴套件
+# 安裝：pip install -r requirements.txt
+
+# LLM API
+anthropic>=0.40.0
+openai>=1.50.0
+google-genai>=1.0.0          # Gemini API
+
+# Agent frameworks
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-anthropic>=0.2.0
+langchain-community>=0.3.0
+langgraph>=0.2.0
+
+# RAG & retrieval
+llama-index>=0.11.0
+llama-index-llms-openai>=0.2.0
+llama-index-embeddings-huggingface>=0.3.0
+chromadb>=0.5.0
+faiss-cpu>=1.8.0
+rank-bm25>=0.2.2
+
+# Document processing
+pypdf>=4.0.0
+pymupdf>=1.24.0
+beautifulsoup4>=4.12.0
+markdownify>=0.13.0
+
+# ML / Fine-tuning (需要 GPU 環境，本地 Mac 可跳過)
+# torch>=2.3.0
+# transformers>=4.44.0
+# peft>=0.12.0
+# trl>=0.10.0
+# datasets>=3.0.0
+# bitsandbytes>=0.43.0      # Linux/GPU only
+# accelerate>=0.34.0
+# mlx-lm>=0.18.0            # Apple Silicon 原生替代
+
+# Evaluation
+# ragas>=0.2.0              # RAG evaluation
+# deepeval>=1.0.0           # LLM evaluation
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.8.0
+pyyaml>=6.0.2
+rich>=13.0.0               # 好看的 terminal 輸出
+notebook>=7.0.0
+ipykernel>=6.29.0
