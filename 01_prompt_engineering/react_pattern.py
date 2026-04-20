@@ -17,17 +17,27 @@ For scientific paper agents: the "tools" are search, extraction, and
 calculation functions. The reasoning traces help debug failures and
 accumulate as examples for the ACE Reflector role.
 
+Note: this is the "prompt-as-protocol" version of ReAct — we parse tool
+calls from free-form text using stop sequences. Production agents should
+use native tool use (client.messages.create(tools=[...])), which is what
+LangGraph/Anthropic Agent SDK builds on top of.
+
 References:
   - ReAct: Synergizing Reasoning and Acting (Yao et al., 2022): https://arxiv.org/abs/2210.03629
-  - LangChain ReAct Agent: https://python.langchain.com/docs/modules/agents/agent_types/react
+  - Anthropic Tool Use: https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview
 """
+
+from __future__ import annotations  # allow `tuple[...] | None` on Python 3.9
 
 import os
 import json
 from typing import Callable
+import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
+
+MODEL = "claude-haiku-4-5"
 
 # ── Simulated tool functions ──────────────────────────────────────────────────
 
@@ -90,7 +100,7 @@ TOOLS: dict[str, tuple[Callable, str]] = {
 }
 
 
-# ── Simple ReAct loop (without LangChain for clarity) ────────────────────────
+# ── Simple ReAct loop (without a framework, for clarity) ─────────────────────
 
 REACT_SYSTEM_PROMPT = """You are a scientific data extraction agent. Use the following tools to answer questions:
 
@@ -124,21 +134,21 @@ def react_agent(question: str, client, max_steps: int = 6) -> str:
     tool_descriptions = "\n".join(f"  {name}: {desc}" for name, (_, desc) in TOOLS.items())
     system = REACT_SYSTEM_PROMPT.format(tool_descriptions=tool_descriptions)
 
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": question},
-    ]
+    # Anthropic: system prompt is a top-level parameter, not a message.
+    messages = [{"role": "user", "content": question}]
 
     trajectory = []
 
     for step in range(max_steps):
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=messages,
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1024,
             temperature=0,
-            stop=["Observation:"],  # stop before writing its own observation
+            system=system,
+            messages=messages,
+            stop_sequences=["Observation:"],  # stop before the model writes its own observation
         )
-        agent_text = response.choices[0].message.content
+        agent_text = next(b.text for b in response.content if b.type == "text")
         messages.append({"role": "assistant", "content": agent_text})
         trajectory.append({"step": step, "agent": agent_text})
 
@@ -148,7 +158,10 @@ def react_agent(question: str, client, max_steps: int = 6) -> str:
             print(f"\n✅ Final Answer after {step + 1} steps:\n{final}")
             print("\n--- Reasoning Trace ---")
             for t in trajectory:
-                print(f"\nStep {t['step'] + 1}:\n{t['agent']}")
+                if "agent" in t:
+                    print(f"\nStep {t['step'] + 1} (agent):\n{t['agent']}")
+                if "observation" in t:
+                    print(f"\nStep {t['step'] + 1} (obs): {t['observation']}")
             return final
 
         # Extract and execute action
@@ -177,10 +190,9 @@ def react_agent(question: str, client, max_steps: int = 6) -> str:
 
 def run_example():
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = anthropic.Anthropic()
     except Exception as e:
-        print(f"OpenAI client init failed: {e}\nSet OPENAI_API_KEY in .env")
+        print(f"Anthropic client init failed: {e}\nSet ANTHROPIC_API_KEY in .env")
         return
 
     question = """From this text, extract all experimental parameters and convert
@@ -191,6 +203,7 @@ def run_example():
 
     Return as JSON."""
 
+    print(f"Model: {MODEL}")
     print("Question:", question)
     react_agent(question, client)
 
@@ -198,7 +211,8 @@ def run_example():
 if __name__ == "__main__":
     run_example()
 
+# TODO: Replace prompt-parsed ReAct with Anthropic native tool use (client.messages.create(tools=[...]))
 # TODO: Replace mock tools with real Materials Project API calls
-# TODO: Add LangGraph version for production use
+# TODO: Add LangGraph version (Week 3) and compare to this minimal loop
 # TODO: Save reasoning traces as training data for fine-tuning
 # TODO: Add Reflector step: analyze trace quality after completion

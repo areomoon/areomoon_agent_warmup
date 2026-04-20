@@ -17,9 +17,13 @@ References:
 
 import os
 import json
+import re
+import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
+
+MODEL = "claude-haiku-4-5"
 
 # Sample scientific text for testing
 SAMPLE_TEXT = """
@@ -45,6 +49,19 @@ EXTRACTION_FIELDS = {
 }
 
 
+def _parse_json(text: str) -> dict:
+    """Extract JSON from model response, tolerating optional markdown fences."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON object found in response:\n{text}")
+    return json.loads(match.group(0))
+
+
+def _extract_text(response) -> str:
+    """Pull the first text block out of an Anthropic response."""
+    return next(b.text for b in response.content if b.type == "text")
+
+
 def zero_shot_extraction(text: str, client) -> dict:
     """Direct extraction without reasoning prompt."""
     prompt = f"""Extract experimental parameters from the following text as JSON.
@@ -52,16 +69,16 @@ def zero_shot_extraction(text: str, client) -> dict:
 Text:
 {text}
 
-Return JSON with these fields: {list(EXTRACTION_FIELDS.keys())}
-Use null for missing values."""
+Return a JSON object with these fields: {list(EXTRACTION_FIELDS.keys())}
+Use null for missing values. Output valid JSON only, no markdown fences or commentary."""
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    return json.loads(response.choices[0].message.content)
+    return _parse_json(_extract_text(response))
 
 
 def zero_shot_cot_extraction(text: str, client) -> dict:
@@ -77,16 +94,17 @@ Let's think step by step:
 3. Convert units if needed (e.g., note original units)
 4. Flag any ambiguous values
 
-After reasoning, output a JSON with these fields: {list(EXTRACTION_FIELDS.keys())}
-Use null for missing values. Include a "reasoning_notes" field summarizing key decisions."""
+After reasoning, output a JSON object with these fields: {list(EXTRACTION_FIELDS.keys())}
+Use null for missing values. Include a "reasoning_notes" field summarizing key decisions.
+Output valid JSON only, no markdown fences or commentary before/after the JSON."""
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    return json.loads(response.choices[0].message.content)
+    return _parse_json(_extract_text(response))
 
 
 def few_shot_cot_extraction(text: str, client) -> dict:
@@ -114,30 +132,29 @@ Output: {json.dumps(example_output, indent=2)}
 Now extract from this text:
 Text: {text}
 
-Reason step by step, then output JSON with fields: {list(EXTRACTION_FIELDS.keys())}
-Include a "reasoning_notes" field."""
+Reason step by step, then output a JSON object with fields: {list(EXTRACTION_FIELDS.keys())}
+Include a "reasoning_notes" field. Output valid JSON only, no markdown fences."""
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    return json.loads(response.choices[0].message.content)
+    return _parse_json(_extract_text(response))
 
 
 def run_comparison():
     """Run all three strategies and compare results."""
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = anthropic.Anthropic()
     except Exception as e:
-        print(f"OpenAI client init failed: {e}")
-        print("Set OPENAI_API_KEY in .env to run this example.")
+        print(f"Anthropic client init failed: {e}")
+        print("Set ANTHROPIC_API_KEY in .env to run this example.")
         return
 
     print("=" * 60)
-    print("CoT Comparison: Scientific Parameter Extraction")
+    print(f"CoT Comparison: Scientific Parameter Extraction ({MODEL})")
     print("=" * 60)
     print(f"\nInput text:\n{SAMPLE_TEXT}\n")
 
@@ -153,7 +170,7 @@ def run_comparison():
         try:
             result = fn(SAMPLE_TEXT, client)
             results[name] = result
-            print(json.dumps(result, indent=2))
+            print(json.dumps(result, indent=2, ensure_ascii=False))
         except Exception as e:
             print(f"Error: {e}")
 
@@ -171,7 +188,7 @@ def run_comparison():
     }
 
     print("\n--- Ground Truth ---")
-    print(json.dumps(ground_truth, indent=2))
+    print(json.dumps(ground_truth, indent=2, ensure_ascii=False))
 
     print("\n--- Field Accuracy Summary ---")
     for name, result in results.items():
@@ -186,7 +203,7 @@ def run_comparison():
 if __name__ == "__main__":
     run_comparison()
 
-# TODO: Add Gemini API alternative (free tier)
-# TODO: Add structured output with JSON schema validation
+# TODO: Add structured output via output_config.format for schema-guaranteed JSON
 # TODO: Add confidence scores per extracted field
 # TODO: Experiment with domain-specific few-shot examples (LSMO, perovskite, etc.)
+# TODO: Try claude-sonnet-4-6 and compare extraction quality vs haiku

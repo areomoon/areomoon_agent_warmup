@@ -16,17 +16,25 @@ This is especially valuable for:
 - Long complex methods sections
 - Tables with merged cells
 
+Note on model choice:
+  Temperature is required for self-consistency (need diverse samples).
+  Claude Opus 4.7 removes temperature/top_p/top_k — use Haiku 4.5 or Sonnet 4.6.
+
 References:
   - Self-Consistency Improves CoT (Wang et al., 2022): https://arxiv.org/abs/2203.11171
 """
 
 import os
 import json
+import re
 from collections import Counter
 from typing import Any
+import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
+
+MODEL = "claude-haiku-4-5"
 
 SAMPLE_TEXT = """
 ZnO nanorods were synthesized hydrothermally. Equimolar solutions of zinc nitrate
@@ -52,6 +60,14 @@ TARGET_FIELDS = [
 ]
 
 
+def _parse_json(text: str) -> dict:
+    """Extract JSON from model response, tolerating optional markdown fences."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON object found in response:\n{text}")
+    return json.loads(match.group(0))
+
+
 def single_extraction(text: str, client, temperature: float = 0.3) -> dict:
     """One extraction attempt with given temperature."""
     prompt = f"""Extract experimental parameters from this scientific text.
@@ -61,15 +77,16 @@ Text: {text}
 
 Fields to extract: {TARGET_FIELDS}
 Use null for missing values. Think carefully about units.
-Output valid JSON only."""
+Output valid JSON only, no markdown fences or commentary."""
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=temperature,
+        messages=[{"role": "user", "content": prompt}],
     )
-    return json.loads(response.choices[0].message.content)
+    text_out = next(b.text for b in response.content if b.type == "text")
+    return _parse_json(text_out)
 
 
 def aggregate_by_majority(samples: list[dict]) -> dict[str, Any]:
@@ -109,7 +126,7 @@ def self_consistent_extraction(text: str, client, n_samples: int = 5) -> dict:
     Run extraction N times, aggregate by majority vote.
     Returns values with per-field confidence scores.
     """
-    print(f"Running {n_samples} extraction samples...")
+    print(f"Running {n_samples} extraction samples with {MODEL}...")
     samples = []
     for i in range(n_samples):
         try:
@@ -137,23 +154,22 @@ def self_consistent_extraction(text: str, client, n_samples: int = 5) -> dict:
 
 def run_example():
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = anthropic.Anthropic()
     except Exception as e:
-        print(f"OpenAI client init failed: {e}\nSet OPENAI_API_KEY in .env")
+        print(f"Anthropic client init failed: {e}\nSet ANTHROPIC_API_KEY in .env")
         return
 
     print("Input text:")
     print(SAMPLE_TEXT)
 
-    result = self_consistent_extraction(SAMPLE_TEXT, client, n_samples=3)
+    result = self_consistent_extraction(SAMPLE_TEXT, client, n_samples=5)
 
     # Separate high-confidence from flagged fields
     high_conf = {k: v["value"] for k, v in result.items() if v["confidence"] >= 0.8}
     low_conf = {k: v for k, v in result.items() if v["confidence"] < 0.8}
 
     print(f"\n✅ High confidence fields ({len(high_conf)}):")
-    print(json.dumps(high_conf, indent=2))
+    print(json.dumps(high_conf, indent=2, ensure_ascii=False))
 
     if low_conf:
         print(f"\n⚠️  Low confidence fields ({len(low_conf)}) — need review:")
@@ -168,3 +184,4 @@ if __name__ == "__main__":
 # TODO: Add cross-document consistency check (same material in multiple papers)
 # TODO: Save low-confidence cases as annotation tasks for human review
 # TODO: Use confidence scores as features for fine-tuning data quality filtering
+# TODO: Parallelize the N samples with AsyncAnthropic for faster iteration
