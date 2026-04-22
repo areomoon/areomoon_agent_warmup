@@ -14,8 +14,9 @@ Format:
   Final Answer: [answer]
 
 For scientific paper agents: the "tools" are search, extraction, and
-calculation functions. The reasoning traces help debug failures and
-accumulate as examples for the ACE Reflector role.
+calculation functions. The reasoning traces are recorded as Trajectory
+objects (see trajectory.py) and persisted to JSONL for debug / eval /
+fine-tune data (Week 5).
 
 Note: this is the "prompt-as-protocol" version of ReAct — we parse tool
 calls from free-form text using stop sequences. Production agents should
@@ -27,17 +28,20 @@ References:
   - Anthropic Tool Use: https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview
 """
 
-from __future__ import annotations  # allow `tuple[...] | None` on Python 3.9
+from __future__ import annotations
 
-import os
-import json
+import time
 from typing import Callable
+
 import anthropic
 from dotenv import load_dotenv
+
+from trajectory import Trajectory, save
 
 load_dotenv()
 
 MODEL = "claude-haiku-4-5"
+DEFAULT_JSONL = "trajectories.jsonl"
 
 # ── Simulated tool functions ──────────────────────────────────────────────────
 
@@ -100,7 +104,7 @@ TOOLS: dict[str, tuple[Callable, str]] = {
 }
 
 
-# ── Simple ReAct loop (without a framework, for clarity) ─────────────────────
+# ── ReAct loop ───────────────────────────────────────────────────────────────
 
 REACT_SYSTEM_PROMPT = """You are a scientific data extraction agent. Use the following tools to answer questions:
 
@@ -126,66 +130,168 @@ def parse_action(action_line: str) -> tuple[str, list[str]] | None:
     return tool_name.strip(), args
 
 
-def react_agent(question: str, client, max_steps: int = 6) -> str:
+def react_agent(
+    question: str,
+    client,
+    max_steps: int = 6,
+    temperature: float = 0.0,
+    jsonl_path: str | None = DEFAULT_JSONL,
+    metadata: dict | None = None,
+    verbose: bool = True,
+) -> Trajectory:
     """
-    Simple ReAct loop: Thought → Action → Observation → repeat.
-    Returns the final answer string.
+    Run a ReAct loop and return a Trajectory object.
+
+    Args:
+        question: user question
+        client: anthropic.Anthropic client
+        max_steps: cap on agent iterations
+        temperature: sampling temperature (0.0 = deterministic, recommended for ReAct)
+        jsonl_path: where to append the trajectory; pass None to skip writing
+        metadata: arbitrary dict stored in traj.metadata (e.g. {"paper_id": "P001"})
+        verbose: print a one-line summary after the run
+
+    Returns:
+        Trajectory object with full reasoning trace.
     """
     tool_descriptions = "\n".join(f"  {name}: {desc}" for name, (_, desc) in TOOLS.items())
     system = REACT_SYSTEM_PROMPT.format(tool_descriptions=tool_descriptions)
-
-    # Anthropic: system prompt is a top-level parameter, not a message.
     messages = [{"role": "user", "content": question}]
 
-    trajectory = []
+    traj = Trajectory(
+        question=question,
+        model=MODEL,
+        temperature=temperature,
+        metadata=metadata or {},
+    )
 
+    finished = False
     for step in range(max_steps):
+        t0 = time.time()
         response = client.messages.create(
             model=MODEL,
             max_tokens=1024,
-            temperature=0,
+            temperature=temperature,
             system=system,
             messages=messages,
-            stop_sequences=["Observation:"],  # stop before the model writes its own observation
+            stop_sequences=["Observation:"],
         )
-        agent_text = next(b.text for b in response.content if b.type == "text")
-        messages.append({"role": "assistant", "content": agent_text})
-        trajectory.append({"step": step, "agent": agent_text})
+        latency_ms = int((time.time() - t0) * 1000)
+        agent_text = next((b.text for b in response.content if b.type == "text"), "")
 
-        # Check if done
+        if not agent_text.strip():
+            traj.append_step(role="error", content="empty response (stop_sequence may have fired immediately)")
+            traj.status = "parse_error"
+            finished = True
+            break
+
+        traj.append_step(
+            role="thought_action",
+            content=agent_text,
+            latency_ms=latency_ms,
+            tokens_in=response.usage.input_tokens,
+            tokens_out=response.usage.output_tokens,
+        )
+        messages.append({"role": "assistant", "content": agent_text})
+
         if "Final Answer:" in agent_text:
             final = agent_text.split("Final Answer:")[-1].strip()
-            print(f"\n✅ Final Answer after {step + 1} steps:\n{final}")
-            print("\n--- Reasoning Trace ---")
-            for t in trajectory:
-                if "agent" in t:
-                    print(f"\nStep {t['step'] + 1} (agent):\n{t['agent']}")
-                if "observation" in t:
-                    print(f"\nStep {t['step'] + 1} (obs): {t['observation']}")
-            return final
+            traj.final_answer = final
+            traj.append_step(role="final", content=final)
+            traj.status = "success"
+            finished = True
+            break
 
-        # Extract and execute action
         if "Action:" in agent_text:
             action_line = agent_text.split("Action:")[-1].strip().split("\n")[0]
             parsed = parse_action(action_line)
-            if parsed:
+            tool_name = None
+            args = None
+            obs_latency = 0
+            if parsed is None:
+                observation = "Could not parse action"
+                traj.status = "parse_error"
+            else:
                 tool_name, args = parsed
                 if tool_name in TOOLS:
                     fn, _ = TOOLS[tool_name]
+                    t1 = time.time()
                     try:
                         observation = fn(*args)
                     except Exception as e:
                         observation = f"Tool error: {e}"
+                        traj.status = "tool_error"
+                    obs_latency = int((time.time() - t1) * 1000)
                 else:
                     observation = f"Unknown tool: {tool_name}"
-            else:
-                observation = "Could not parse action"
+                    traj.status = "tool_error"
 
-            observation_msg = f"Observation: {observation}"
-            messages.append({"role": "user", "content": observation_msg})
-            trajectory.append({"step": step, "observation": observation})
+            traj.append_step(
+                role="observation",
+                tool_name=tool_name,
+                tool_args={"args": args} if args is not None else None,
+                tool_result=observation,
+                latency_ms=obs_latency,
+            )
+            messages.append({"role": "user", "content": f"Observation: {observation}"})
 
-    return "Max steps reached without final answer"
+    if not finished:
+        traj.status = "max_steps"
+
+    if jsonl_path:
+        save(traj, jsonl_path)
+
+    if verbose:
+        _print_summary(traj)
+
+    return traj
+
+
+def _print_summary(traj: Trajectory) -> None:
+    print(f"[{traj.run_id}] status={traj.status} steps={len(traj.steps)} "
+          f"tokens={traj.total_tokens} t={traj.temperature}")
+    if traj.final_answer:
+        preview = traj.final_answer[:300].replace("\n", " ")
+        print(f"  Final: {preview}{'...' if len(traj.final_answer) > 300 else ''}")
+
+
+# ── Temperature sweep helper ─────────────────────────────────────────────────
+
+def run_temperature_sweep(
+    question: str | None = None,
+    temperatures: list[float] = (0.0, 0.3, 0.7, 1.0),
+    trials: int = 5,
+    jsonl_path: str = DEFAULT_JSONL,
+) -> list[Trajectory]:
+    """Run the same question across a grid of temperatures × trials.
+
+    Use analyze_trajectories.py to inspect the resulting JSONL.
+    """
+    client = anthropic.Anthropic()
+    if question is None:
+        question = """From this text, extract all experimental parameters and convert
+        oxygen pressure to Pa and substrate temperature to K:
+
+        'LSMO thin films were deposited via PLD at 700°C substrate temperature under
+        200 mTorr O₂. Film thickness was ~50 nm.'
+
+        Return as JSON."""
+
+    results = []
+    for t in temperatures:
+        for trial in range(trials):
+            print(f"\n--- temperature={t} trial={trial + 1}/{trials} ---")
+            traj = react_agent(
+                question=question,
+                client=client,
+                temperature=t,
+                jsonl_path=jsonl_path,
+                metadata={"sweep_trial": trial, "sweep_temperature": t},
+                verbose=True,
+            )
+            results.append(traj)
+    print(f"\n✓ Wrote {len(results)} trajectories to {jsonl_path}")
+    return results
 
 
 def run_example():
@@ -205,7 +311,7 @@ def run_example():
 
     print(f"Model: {MODEL}")
     print("Question:", question)
-    react_agent(question, client)
+    react_agent(question, client, temperature=0.0)
 
 
 if __name__ == "__main__":
@@ -214,5 +320,4 @@ if __name__ == "__main__":
 # TODO: Replace prompt-parsed ReAct with Anthropic native tool use (client.messages.create(tools=[...]))
 # TODO: Replace mock tools with real Materials Project API calls
 # TODO: Add LangGraph version (Week 3) and compare to this minimal loop
-# TODO: Save reasoning traces as training data for fine-tuning
-# TODO: Add Reflector step: analyze trace quality after completion
+# TODO: Add Reflector step: analyze trace quality after completion (Week 5)
