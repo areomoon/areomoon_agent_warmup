@@ -25,7 +25,9 @@ References:
 """
 
 import os
+import sys
 import json
+import pathlib
 from dotenv import load_dotenv
 from playbook_evolution import (
     Playbook, PlaybookRule,
@@ -34,7 +36,12 @@ from playbook_evolution import (
     PLAYBOOK_PATH,
 )
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "resources"))
+from anthropic_helpers import get_client, extract_text, parse_json, DEFAULT_MODEL
+
 load_dotenv()
+
+MODEL = DEFAULT_MODEL
 
 MATERIAL_LAYERS = ["design_rules", "synthesis_protocols", "characterization", "extraction"]
 
@@ -50,7 +57,7 @@ def curator_agent(
     Args:
         lessons: List of lesson dicts from Reflector (field, error_type, lesson, confidence_boost)
         playbook: Current playbook to update
-        client: OpenAI client for semantic similarity checks
+        client: Anthropic client for semantic similarity checks
 
     Returns:
         (appended, merged, skipped) counts
@@ -93,7 +100,7 @@ def curator_agent(
 
 def classify_layer(rule_text: str, client) -> str:
     """Classify a rule into one of the four playbook layers."""
-    if not os.getenv("OPENAI_API_KEY"):
+    if client is None:
         # Fallback: keyword-based classification
         text_lower = rule_text.lower()
         if any(w in text_lower for w in ["extract", "parse", "table", "caption", "unit", "notation"]):
@@ -105,8 +112,6 @@ def classify_layer(rule_text: str, client) -> str:
         return "design_rules"
 
     try:
-        from openai import OpenAI
-        oai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         prompt = f"""Classify this materials science rule into exactly one category:
 - design_rules: about what materials/compositions to use
 - synthesis_protocols: about how to make/process materials
@@ -115,15 +120,16 @@ def classify_layer(rule_text: str, client) -> str:
 
 Rule: "{rule_text}"
 
-Return JSON: {{"layer": "one of the four categories"}}"""
+Return JSON: {{"layer": "one of the four categories"}}
+Output valid JSON only, no markdown fences or commentary."""
 
-        response = oai.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=256,
             temperature=0,
+            messages=[{"role": "user", "content": prompt}],
         )
-        result = json.loads(response.choices[0].message.content)
+        result = parse_json(extract_text(response))
         layer = result.get("layer", "extraction")
         if layer in MATERIAL_LAYERS:
             return layer
@@ -135,12 +141,10 @@ Return JSON: {{"layer": "one of the four categories"}}"""
 
 def find_semantic_duplicate(new_rule: str, existing_rules: list[PlaybookRule], client) -> PlaybookRule | None:
     """Find semantically equivalent rule using LLM comparison."""
-    if not existing_rules or not os.getenv("OPENAI_API_KEY"):
+    if not existing_rules or client is None:
         return None
 
     try:
-        from openai import OpenAI
-        oai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         existing_texts = {i: r.rule for i, r in enumerate(existing_rules)}
         prompt = f"""Is this new rule semantically equivalent (same meaning) to any existing rule?
 
@@ -150,15 +154,16 @@ Existing rules:
 {json.dumps(existing_texts, indent=2)}
 
 Return JSON: {{"is_duplicate": true/false, "duplicate_index": null_or_int}}
-Only mark as duplicate if they convey the same actionable instruction."""
+Only mark as duplicate if they convey the same actionable instruction.
+Output valid JSON only, no markdown fences or commentary."""
 
-        response = oai.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=512,
             temperature=0,
+            messages=[{"role": "user", "content": prompt}],
         )
-        result = json.loads(response.choices[0].message.content)
+        result = parse_json(extract_text(response))
         if result.get("is_duplicate"):
             idx = result.get("duplicate_index")
             if idx is not None and 0 <= idx < len(existing_rules):
@@ -208,8 +213,7 @@ def run_full_grc_loop_demo():
 
     print("Processing lessons from Reflector...\n")
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = get_client()
     except Exception:
         client = None
 

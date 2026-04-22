@@ -8,13 +8,19 @@ Key consideration: scientific text has domain-specific vocabulary
 may not represent well.
 
 Models tested:
-- BAAI/bge-small-en-v1.5 (fast, local, good general quality)
-- text-embedding-3-small (OpenAI, API cost, strong general)
+- BAAI/bge-small-en-v1.5 (fast, local, good general quality) — default
 - BAAI/bge-m3 (multilingual, handles Chinese+English mixed text)
+- text-embedding-3-small (OpenAI, API cost, optional)
+
+Note: Anthropic does not provide an embedding API. For this project's Anthropic-first
+stack, the default is the local HuggingFace BGE model. The OpenAI embedding path is
+kept as an optional baseline; consider Voyage AI (Anthropic's recommended partner,
+`voyageai` package) if a hosted embedding API is needed in the future.
 
 References:
   - BGE: https://huggingface.co/BAAI/bge-small-en-v1.5
   - Text Embedding 3: https://platform.openai.com/docs/guides/embeddings
+  - Voyage AI (Anthropic partner): https://docs.voyageai.com/
 """
 
 import os
@@ -62,7 +68,10 @@ def embed_with_huggingface(texts: list[str], model_name: str = "BAAI/bge-small-e
 
 
 def embed_with_openai(texts: list[str], model: str = "text-embedding-3-small") -> np.ndarray:
-    """Embed texts using OpenAI embedding API."""
+    """Embed texts using OpenAI embedding API (optional; Anthropic has no embedding API)."""
+    if not os.getenv("OPENAI_API_KEY"):
+        print("OPENAI_API_KEY not set — OpenAI embedding path is optional, skipping.")
+        return np.array([])
     try:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))

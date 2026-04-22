@@ -23,11 +23,18 @@ References:
 """
 
 import os
+import sys
 import json
+import pathlib
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "resources"))
+from anthropic_helpers import get_client, extract_text, parse_json, DEFAULT_MODEL
+
 load_dotenv()
+
+MODEL = DEFAULT_MODEL
 
 SAMPLE_TEXT = """
 BiFeO₃ (BFO) multiferroic thin films were grown by chemical vapor deposition (CVD)
@@ -62,15 +69,16 @@ Be thorough — get every number, unit, and measurement.
 
 Text: {text}
 
-Return JSON with every extractable parameter."""
+Return JSON with every extractable parameter.
+Output valid JSON only, no markdown fences or commentary."""
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    data = json.loads(response.choices[0].message.content)
+    data = parse_json(extract_text(response))
     return AgentMessage(
         sender="extractor",
         content=f"Extracted {len(data)} parameters",
@@ -99,15 +107,17 @@ Return JSON:
   "issues": [{{"field": "...", "issue": "...", "severity": "error|warning"}}],
   "missed_parameters": [{{"name": "...", "value": ..., "source_text": "..."}}],
   "corrected_extraction": {{...}}  // full corrected version
-}}"""
+}}
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+Output valid JSON only, no markdown fences or commentary."""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    data = json.loads(response.choices[0].message.content)
+    data = parse_json(extract_text(response))
     return AgentMessage(
         sender="analyzer",
         content=f"Validation: {data.get('validation_status', 'unknown')} — {len(data.get('issues', []))} issues",
@@ -184,10 +194,9 @@ def orchestrator(text: str, client) -> dict:
 
 def run_example():
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = get_client()
     except Exception as e:
-        print(f"OpenAI client init failed: {e}\nSet OPENAI_API_KEY in .env")
+        print(f"Anthropic client init failed: {e}\nSet ANTHROPIC_API_KEY in .env")
         return
 
     result = orchestrator(SAMPLE_TEXT, client)

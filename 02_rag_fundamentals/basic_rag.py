@@ -24,29 +24,29 @@ load_dotenv()
 
 # ── LlamaIndex RAG Pipeline ───────────────────────────────────────────────────
 
-def build_rag_pipeline(pdf_path: str, llm_model: str = "gpt-4.1-mini"):
+def build_rag_pipeline(pdf_path: str, llm_model: str = "claude-haiku-4-5"):
     """
     Build a RAG query engine from a PDF file.
 
     Args:
         pdf_path: Path to a scientific paper PDF
-        llm_model: OpenAI model to use for generation
+        llm_model: Anthropic model to use for generation
 
     Returns:
         LlamaIndex query engine
     """
     try:
         from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
-        from llama_index.llms.openai import OpenAI
+        from llama_index.llms.anthropic import Anthropic
         from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     except ImportError:
-        print("Install: pip install llama-index llama-index-llms-openai llama-index-embeddings-huggingface")
+        print("Install: pip install llama-index llama-index-llms-anthropic llama-index-embeddings-huggingface")
         return None
 
-    # Use a lightweight local embedding model to avoid embedding API costs
-    # BGE-small is fast and good for scientific text
+    # Use a lightweight local embedding model to avoid embedding API costs.
+    # Anthropic has no embedding API; BGE-small is fast and good for scientific text.
     Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-    Settings.llm = OpenAI(model=llm_model, temperature=0.1, api_key=os.getenv("OPENAI_API_KEY"))
+    Settings.llm = Anthropic(model=llm_model, temperature=0.1, api_key=os.getenv("ANTHROPIC_API_KEY"))
 
     # Load document
     pdf_dir = str(Path(pdf_path).parent)
@@ -111,7 +111,7 @@ def run_example():
         print("2. Chunk with SentenceSplitter (chunk_size=512, overlap=50)")
         print("3. Embed with BGE-small-en-v1.5 (local, free)")
         print("4. Index in VectorStoreIndex (in-memory)")
-        print("5. Query: top-5 chunks → GPT-4.1-mini → structured answer")
+        print("5. Query: top-5 chunks → claude-haiku-4-5 → structured answer")
         return
 
     query_engine = build_rag_pipeline(sample_pdf)

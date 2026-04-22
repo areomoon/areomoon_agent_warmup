@@ -21,14 +21,21 @@ References:
 """
 
 import os
+import sys
 import json
+import pathlib
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "resources"))
+from anthropic_helpers import get_client, extract_text, parse_json, DEFAULT_MODEL
+
 load_dotenv()
+
+MODEL = DEFAULT_MODEL
 
 PLAYBOOK_PATH = Path("data/materials_extraction_playbook.json")
 
@@ -115,7 +122,7 @@ def is_duplicate(new_rule: str, existing_rules: list[PlaybookRule], client, thre
     Check if a new rule is semantically similar to an existing one.
     Uses LLM for semantic similarity (simple cosine similarity alternative for small playbooks).
     """
-    if not existing_rules or not os.getenv("OPENAI_API_KEY"):
+    if not existing_rules or not os.getenv("ANTHROPIC_API_KEY"):
         return None  # Skip dedup if no API
 
     existing_texts = [r.rule for r in existing_rules]
@@ -127,18 +134,18 @@ Existing rules:
 {json.dumps(existing_texts, indent=2)}
 
 Return JSON: {{"is_duplicate": true/false, "duplicate_index": null_or_int, "similarity": 0.0-1.0}}
-Threshold: similarity > {threshold} is considered duplicate."""
+Threshold: similarity > {threshold} is considered duplicate.
+Output valid JSON only, no markdown fences or commentary."""
 
     try:
-        from openai import OpenAI
-        client_obj = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        response = client_obj.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
+        client_obj = client or get_client()
+        response = client_obj.messages.create(
+            model=MODEL,
+            max_tokens=512,
             temperature=0,
+            messages=[{"role": "user", "content": prompt}],
         )
-        result = json.loads(response.choices[0].message.content)
+        result = parse_json(extract_text(response))
         if result.get("is_duplicate") and result.get("duplicate_index") is not None:
             idx = result["duplicate_index"]
             if 0 <= idx < len(existing_rules):

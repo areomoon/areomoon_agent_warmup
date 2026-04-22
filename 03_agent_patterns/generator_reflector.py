@@ -26,11 +26,18 @@ References:
 """
 
 import os
+import sys
 import json
+import pathlib
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "resources"))
+from anthropic_helpers import get_client, extract_text, parse_json, DEFAULT_MODEL
+
 load_dotenv()
+
+MODEL = DEFAULT_MODEL
 
 SAMPLE_TEXT = """
 The synthesis of VO₂ thin films was carried out using reactive DC magnetron sputtering.
@@ -94,15 +101,16 @@ Also include:
   "confidence_notes": "brief notes on any uncertain extractions"
   "flagged_fields": ["list of fields with low confidence"]
 
-Use null for genuinely missing values."""
+Use null for genuinely missing values.
+Output valid JSON only, no markdown fences or commentary."""
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    raw = json.loads(response.choices[0].message.content)
+    raw = parse_json(extract_text(response))
 
     return ExtractionResult(
         data={k: raw.get(k) for k in schema},
@@ -152,15 +160,17 @@ Return JSON with:
   ],
   "overall_quality": "good|acceptable|poor",
   "summary": "one-sentence summary"
-}}"""
+}}
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+Output valid JSON only, no markdown fences or commentary."""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    raw = json.loads(response.choices[0].message.content)
+    raw = parse_json(extract_text(response))
 
     lessons = []
     for l in raw.get("lessons", []):
@@ -215,10 +225,9 @@ def generator_reflector_loop(
 
 def run_example():
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = get_client()
     except Exception as e:
-        print(f"OpenAI client init failed: {e}\nSet OPENAI_API_KEY in .env")
+        print(f"Anthropic client init failed: {e}\nSet ANTHROPIC_API_KEY in .env")
         return
 
     # Ground truth for VO₂ example

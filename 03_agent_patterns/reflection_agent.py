@@ -18,12 +18,19 @@ References:
 """
 
 import os
+import sys
 import json
+import pathlib
 from typing import TypedDict, Annotated
 import operator
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "resources"))
+from anthropic_helpers import get_client, extract_text, parse_json, DEFAULT_MODEL
+
 load_dotenv()
+
+MODEL = DEFAULT_MODEL
 
 
 class ExtractionState(TypedDict):
@@ -51,15 +58,16 @@ Text:
 {state['text']}
 
 Return JSON with all numerical parameters, units, and methods you can identify.
-Include a "self_quality_score" field (0.0-1.0) for your confidence in the extraction."""
+Include a "self_quality_score" field (0.0-1.0) for your confidence in the extraction.
+Output valid JSON only, no markdown fences or commentary."""
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    result = json.loads(response.choices[0].message.content)
+    result = parse_json(extract_text(response))
     quality = float(result.pop("self_quality_score", 0.7))
 
     return {
@@ -94,15 +102,17 @@ Return JSON:
   "needs_revision": true/false,
   "quality_score": 0.0-1.0,
   "critical_errors": ["list of must-fix errors"]
-}}"""
+}}
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+Output valid JSON only, no markdown fences or commentary."""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
         temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    result = json.loads(response.choices[0].message.content)
+    result = parse_json(extract_text(response))
 
     return {
         **state,
@@ -153,10 +163,9 @@ def build_reflection_graph(client):
 
 def run_example():
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = get_client()
     except Exception as e:
-        print(f"OpenAI client init failed: {e}\nSet OPENAI_API_KEY in .env")
+        print(f"Anthropic client init failed: {e}\nSet ANTHROPIC_API_KEY in .env")
         return
 
     app = build_reflection_graph(client)
